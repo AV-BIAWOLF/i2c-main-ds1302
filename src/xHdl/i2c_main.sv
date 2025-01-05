@@ -1,5 +1,6 @@
 `timescale 1ns / 1ps
 
+
 module i2c_main(
     input clk,
     input reset,
@@ -26,16 +27,14 @@ module i2c_main(
     output logic o_data_enable
 );
 
-    // === Внутренние сигналы ===
+    // === Internal signals ===
     logic r_wr_data;
     logic r_rd_data;
     logic r_buf_state;
     logic [7:0] r_buf_data;
-    logic [3:0] bit_counter;   // Для отслеживания передачи 8 бит
+    logic [3:0] bit_counter; 
     
-    //
     logic r_read_write_flag;
-    //
 
     // === IOBUF для управления SDA ===
     IOBUF iobuf_inst (
@@ -59,9 +58,7 @@ module i2c_main(
     
     state_t state;
 
-    // === Формирование стабильного SCLK ===
     logic [7:0] clk_div_counter;
-
     
     always @(posedge clk or posedge reset) begin
         if (reset) begin
@@ -73,58 +70,52 @@ module i2c_main(
         end
     end
 
-    // === Логика FSM ===
         always @(posedge clk or posedge reset) begin
         if (reset) begin
-            // Сброс всех сигналов
             state <= IDLE;
             o_wr_done <= 0;
             o_rd_done <= 0;
             o_rx_data_valid <= 0;
             o_data_enable <= 0;
-            r_buf_state <= 1'b1; // Высокий импеданс
+            r_buf_state <= 1'b1; // High impedance
             r_buf_data <= 8'b0;
             bit_counter <= 0;
             o_CE <= 0;
             last_bit <= 0;
     
-            // Явный сброс проблемных сигналов
             r_wr_data <= 1'b0;
             r_read_write_flag <= 1'b0;
-            o_rd_data <= 8'b0;
     
         end else begin
             case (state)
-                // === IDLE: ожидание команд ===
                 IDLE: begin
                     o_CE <= 0;
                     last_bit <= 0;
                     o_wr_done <= 0;
                     o_rd_done <= 0;
                     o_rx_data_valid <= 0;
-                    r_buf_state <= 1'b1; // Высокий импеданс
+                    r_buf_state <= 1'b1; // High impedance
                     o_data_enable <= 0;
     
                     if (i_wr_en) begin
                         r_buf_data[7:3] <= i_addr;
-                        r_buf_state <= 1'b0; // Управление линией SDA
+                        r_buf_state <= 1'b0; // SDA line control
                         o_CE <= 1;
                         state <= RW_selec;
-                        r_wr_data <= 1'b0; // Устанавливаем для записи
-                        r_read_write_flag <= 1'b0; // Пишем
+                        r_wr_data <= 1'b0; // Set for recording
+                        r_read_write_flag <= 1'b0; // Writing
                     end else if (i_rd_en) begin
                         r_buf_data[7:3] <= i_addr;
-                        r_buf_state <= 1'b0; // Управление линией SDA
+                        r_buf_state <= 1'b0; // SDA line control
                         o_CE <= 1;
                         state <= RW_selec;
-                        r_wr_data <= 1'b1; // Устанавливаем для чтения
-                        r_read_write_flag <= 1'b1; // Читаем
+                        r_wr_data <= 1'b1; // Set to read
+                        r_read_write_flag <= 1'b1; // Reading
                     end else begin
-                        r_wr_data <= 1'b0; // Сброс при отсутствии команды
+                        r_wr_data <= 1'b0; // Reset when there is no command
                     end
                 end
     
-                // Остальные состояния
                 RW_selec: begin
                     if (o_SCLK) begin
                         state <= TX_ADD;
@@ -133,15 +124,13 @@ module i2c_main(
                 end
     
                 TX_ADD: begin
-                    r_wr_data <= r_buf_data[7]; // Передача старшего бита
+                    r_wr_data <= r_buf_data[7]; // Transmit high bit
                     if (o_SCLK) begin
                         bit_counter <= bit_counter + 1;
-                        r_buf_data <= {r_buf_data[6:0], 1'b0}; // Сдвиг данных
-//                        if (bit_counter == 3) begin
+                        r_buf_data <= {r_buf_data[6:0], 1'b0}; // Data Shift
                         if (bit_counter == 4) begin
-//                        if (bit_counter == 5) begin
                             bit_counter <= 0;
-                            r_buf_data <= i_wr_data; // Готовим данные для передачи
+                            r_buf_data <= i_wr_data; // Preparing data for transmission
                             state <= RC_selec;
                         end
                     end
@@ -157,11 +146,13 @@ module i2c_main(
                 LAST_BIT: begin
                     r_wr_data <= 1'b1;
                     last_bit <= 1'b1;
+                    $display("\nLAST BIT = %b\n", last_bit);
                     if (o_SCLK) begin
                         if (r_read_write_flag) begin 
                             state <= RX_DATA;
-                            r_buf_state <= 1'b1; // Переключаем SDA в режим входа
+//                            r_buf_state <= 1'b1; // Switching SDA to input mode
                             last_bit <= 1'b0;
+                            o_rx_data_valid <= 1'b1;
                         end else begin 
                             state <= TX_DATA;
                             last_bit <= 1'b0;
@@ -170,10 +161,10 @@ module i2c_main(
                 end
     
                 TX_DATA: begin
-                    r_wr_data <= r_buf_data[7]; // Передача старшего бита
+                    r_wr_data <= r_buf_data[7]; // Transmit high bit
                     if (o_SCLK) begin
                         bit_counter <= bit_counter + 1;
-                        r_buf_data <= {r_buf_data[6:0], 1'b0}; // Сдвиг данных
+                        r_buf_data <= {r_buf_data[6:0], 1'b0}; // Data Shift
                         if (bit_counter == 7) begin
                             state <= DONE;
                             bit_counter <= 0;
@@ -183,31 +174,35 @@ module i2c_main(
                 end
     
                 RX_DATA: begin
+                    //
+                    r_buf_state <= 1'b1;
+                    //
                     if (o_SCLK) begin
+                        r_wr_data <= 8'd0;
                         r_buf_data <= {r_buf_data[6:0], r_rd_data}; // Сдвиг входных данных
                         bit_counter <= bit_counter + 1;
                         if (bit_counter == 7) begin
-                            o_rd_data <= r_buf_data;
                             o_rd_done <= 1;
                             state <= DONE;
                             bit_counter <= 0;
                             r_buf_state <= 1'b0; // Высокий импеданс
+                            o_CE <= 0;
+                            o_rx_data_valid <= 1'b0;
                         end
+                        
                     end
                 end
     
                 DONE: begin
-                    if (o_SCLK) begin
-                        state <= IDLE;
-                        o_rx_data_valid <= 1'b0;
-                        o_wr_done <= 0;
-                        o_CE <= 0;
-                        r_buf_state <= 1'b1; // Высокий импеданс
-                        r_wr_data <= 1'b0; // Сброс значения
-                    end
+                    state <= IDLE;
+                    o_wr_done <= 0;
+                    r_buf_state <= 1'b1; // Высокий импеданс
+                    r_wr_data <= 1'b0; // Сброс значения
                 end
             endcase
         end
     end
+
+    assign o_rd_data = o_rd_done ? r_buf_data: 8'd0;
 
 endmodule
